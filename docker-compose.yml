@@ -1,14 +1,10 @@
 # ============================================
 # RCE Engine - Docker Compose Configuration
 # ============================================
-# Architecture:
-#   - Frontend (React/Vite) → Port 5173
-#   - API Gateway (Node/Express) → Port 3000
-#   - Execution Worker (Go) → Connects to Docker socket
-#   - Redis → Job queue between API and Worker
-#   - MongoDB → Persistent storage for submissions
-#
-# Network: All services communicate via 'rce-net'
+# Stage 2: Producer-Consumer Pattern
+#   - API Gateway (Producer) → Pushes to Redis Queue
+#   - Execution Worker (Consumer) → Pulls from Redis Queue
+#   - MongoDB stores job status
 # ============================================
 
 services:
@@ -23,9 +19,7 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      # Mount source for hot-reload
       - ./frontend/code-editor:/app
-      # Prevent container's node_modules from being overwritten
       - /app/node_modules
     environment:
       - NODE_ENV=development
@@ -38,6 +32,7 @@ services:
 
   # ==========================================
   # API Gateway - Node.js/Express/TypeScript
+  # THE PRODUCER - Accepts submissions, queues to Redis
   # ==========================================
   api-gateway:
     build:
@@ -49,7 +44,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      # Redis connection - must use 'redis' as hostname (service name)
       - REDIS_URL=redis://redis:6379
+      # MongoDB connection - must use 'mongo' as hostname (service name)
       - MONGO_URL=mongodb://mongo:27017/rce-engine
     networks:
       - rce-net
@@ -63,15 +60,12 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     restart: unless-stopped
 
   # ==========================================
   # Execution Worker - Go
-  # ==========================================
-  # CRITICAL: This service has access to the Docker socket
-  # which allows it to spawn sibling containers for code execution.
-  # This is a security-sensitive configuration.
+  # THE CONSUMER - Listens to Redis, processes jobs
   # ==========================================
   execution-worker:
     build:
@@ -79,11 +73,11 @@ services:
       dockerfile: Dockerfile
     container_name: rce-execution-worker
     volumes:
-      # CRITICAL: Mount Docker socket to enable sibling container spawning
-      # On Windows with Docker Desktop, this path is virtualized
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      # Redis connection - must use 'redis' as hostname (service name)
       - REDIS_URL=redis://redis:6379
+      # MongoDB connection - must use 'mongo' as hostname (service name)
       - MONGO_URL=mongodb://mongo:27017/rce-engine
       - DOCKER_HOST=unix:///var/run/docker.sock
     networks:
@@ -93,11 +87,10 @@ services:
         condition: service_healthy
       mongo:
         condition: service_healthy
-    # Worker doesn't expose ports - it pulls from Redis queue
     restart: unless-stopped
 
   # ==========================================
-  # Redis - Job Queue
+  # Redis - Job Queue (The Message Broker)
   # ==========================================
   redis:
     image: redis:7-alpine
@@ -118,7 +111,7 @@ services:
     restart: unless-stopped
 
   # ==========================================
-  # MongoDB - Persistent Storage
+  # MongoDB - Persistent Storage (Job Status)
   # ==========================================
   mongo:
     image: mongo:7
@@ -129,7 +122,6 @@ services:
       - mongo-data:/data/db
       - mongo-config:/data/configdb
     environment:
-      # For development - add auth in production
       - MONGO_INITDB_DATABASE=rce-engine
     networks:
       - rce-net
@@ -159,4 +151,3 @@ volumes:
     name: rce-mongo-data
   mongo-config:
     name: rce-mongo-config
-
