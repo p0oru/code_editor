@@ -1,0 +1,35 @@
+# ============================================
+# Development Override Configuration
+# ============================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# This override file enables development-friendly features:
+# - Volume mounts for hot-reload
+# - Exposed ports for debugging
+# - Development environment variables
+# ============================================
+
+services:
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+      # Use a development stage if you add one
+      target: builder
+    volumes:
+      - ./backend/api-gateway:/app
+      - /app/node_modules
+    command: npm run dev
+    environment:
+      - NODE_ENV=development
+
+  execution-worker:
+    volumes:
+      - ./backend/execution-worker:/app
+    environment:
+      - DEBUG=true
+
+  frontend:
+    # Already configured for development in main compose
+    environment:
+      - VITE_DEBUG=true
+

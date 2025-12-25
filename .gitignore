@@ -1,0 +1,177 @@
+# ============================================
+# RCE Engine - Comprehensive .gitignore
+# Covers: Node.js, Go, React, Docker, IDEs
+# ============================================
+
+# ==========================================
+# Node.js / JavaScript / TypeScript
+# ==========================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+lerna-debug.log*
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+
+# Cache
+.npm
+.eslintcache
+.cache/
+*.tsbuildinfo
+
+# Environment files (contains secrets)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# ==========================================
+# Go / Golang
+# ==========================================
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+main
+
+# Test binary
+*.test
+
+# Output of go coverage tool
+*.out
+coverage.txt
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# ==========================================
+# React / Vite Specific
+# ==========================================
+*.local
+.vite/
+
+# ==========================================
+# Docker
+# ==========================================
+# Ignore docker-compose override files (local customizations)
+docker-compose.override.yml
+docker-compose.*.override.yml
+
+# Docker build context files that shouldn't be included
+*.tar
+*.tar.gz
+
+# ==========================================
+# IDEs and Editors
+# ==========================================
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# JetBrains IDEs (IntelliJ, GoLand, WebStorm)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.#*
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# ==========================================
+# Operating System Files
+# ==========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# ==========================================
+# Logs and Debug Files
+# ==========================================
+logs/
+*.log
+*.log.*
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# ==========================================
+# Test Coverage
+# ==========================================
+coverage/
+.nyc_output/
+htmlcov/
+
+# ==========================================
+# Misc
+# ==========================================
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+
+# Documentation build output
+docs/_build/
+
+# Local development overrides
+*.local.yml
+*.local.yaml
+
+# Package manager locks (optional - some teams prefer to commit these)
+# Uncomment if you don't want to track lock files:
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+

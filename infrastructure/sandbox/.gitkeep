@@ -1,0 +1,7 @@
+# Placeholder for sandbox Dockerfiles (Stage 2)
+# This directory will contain isolated execution environments:
+# - Dockerfile.python
+# - Dockerfile.javascript
+# - Dockerfile.go
+# - etc.
+

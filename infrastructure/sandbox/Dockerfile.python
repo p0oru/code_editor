@@ -1,0 +1,30 @@
+# ============================================
+# Python Sandbox - Isolated Execution Environment
+# ============================================
+# STAGE 2 PLACEHOLDER
+#
+# This Dockerfile will create a minimal, secure Python
+# environment for executing user code.
+#
+# Security measures to implement:
+# - Read-only filesystem
+# - No network access
+# - Limited CPU/memory
+# - Non-root user
+# - No shell access
+# ============================================
+
+FROM python:3.12-alpine
+
+# Security: Create non-root user
+RUN addgroup -S sandbox && adduser -S -G sandbox sandbox
+
+# Minimal Python setup
+WORKDIR /sandbox
+
+# Switch to non-root user
+USER sandbox
+
+# Default: just Python available
+CMD ["python3", "--version"]
+

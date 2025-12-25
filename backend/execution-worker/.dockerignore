@@ -1,0 +1,15 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+bin/
+.git
+.gitignore
+*.md
+Dockerfile*
+docker-compose*
+

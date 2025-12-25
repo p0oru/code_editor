@@ -1,0 +1,162 @@
+# ============================================
+# RCE Engine - Docker Compose Configuration
+# ============================================
+# Architecture:
+#   - Frontend (React/Vite) → Port 5173
+#   - API Gateway (Node/Express) → Port 3000
+#   - Execution Worker (Go) → Connects to Docker socket
+#   - Redis → Job queue between API and Worker
+#   - MongoDB → Persistent storage for submissions
+#
+# Network: All services communicate via 'rce-net'
+# ============================================
+
+services:
+  # ==========================================
+  # Frontend - React/Vite Development Server
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend/code-editor
+      dockerfile: Dockerfile
+    container_name: rce-frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      # Mount source for hot-reload
+      - ./frontend/code-editor:/app
+      # Prevent container's node_modules from being overwritten
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:3000
+    networks:
+      - rce-net
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  # ==========================================
+  # API Gateway - Node.js/Express/TypeScript
+  # ==========================================
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+      dockerfile: Dockerfile
+    container_name: rce-api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - MONGO_URL=mongodb://mongo:27017/rce-engine
+    networks:
+      - rce-net
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ==========================================
+  # Execution Worker - Go
+  # ==========================================
+  # CRITICAL: This service has access to the Docker socket
+  # which allows it to spawn sibling containers for code execution.
+  # This is a security-sensitive configuration.
+  # ==========================================
+  execution-worker:
+    build:
+      context: ./backend/execution-worker
+      dockerfile: Dockerfile
+    container_name: rce-execution-worker
+    volumes:
+      # CRITICAL: Mount Docker socket to enable sibling container spawning
+      # On Windows with Docker Desktop, this path is virtualized
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - MONGO_URL=mongodb://mongo:27017/rce-engine
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    networks:
+      - rce-net
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    # Worker doesn't expose ports - it pulls from Redis queue
+    restart: unless-stopped
+
+  # ==========================================
+  # Redis - Job Queue
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: rce-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - rce-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  # ==========================================
+  # MongoDB - Persistent Storage
+  # ==========================================
+  mongo:
+    image: mongo:7
+    container_name: rce-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+    environment:
+      # For development - add auth in production
+      - MONGO_INITDB_DATABASE=rce-engine
+    networks:
+      - rce-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+# ==========================================
+# Networks
+# ==========================================
+networks:
+  rce-net:
+    driver: bridge
+    name: rce-net
+
+# ==========================================
+# Volumes - Persistent Data
+# ==========================================
+volumes:
+  redis-data:
+    name: rce-redis-data
+  mongo-data:
+    name: rce-mongo-data
+  mongo-config:
+    name: rce-mongo-config
+
