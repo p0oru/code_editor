@@ -12,7 +12,6 @@ export function getRedisClient(): Redis {
 
     redisClient = new Redis(redisUrl, {
       maxRetriesPerRequest: 3,
-      retryDelayOnFailover: 100,
       lazyConnect: false,
     });
 
@@ -38,4 +37,3 @@ export async function closeRedis(): Promise<void> {
     redisClient = null;
   }
 }
-

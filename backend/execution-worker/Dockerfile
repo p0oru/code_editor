@@ -28,13 +28,14 @@ RUN apk add --no-cache git ca-certificates
 
 WORKDIR /build
 
-# Cache dependencies
-COPY go.mod go.sum* ./
-RUN go mod download
+# Copy go.mod and generate go.sum if missing
+COPY go.mod ./
+RUN go mod download && go mod tidy
 
 # Copy source and build
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN go mod tidy && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s -X main.version=1.0.0" \
     -o execution-worker \
     main.go
@@ -76,4 +77,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD pgrep execution-worker || exit 1
 
 CMD ["./execution-worker"]
-
