@@ -11,12 +11,17 @@ export default defineConfig({
     watch: {
       usePolling: true, // Required for Docker on Windows
     },
+    // Proxy API requests to the backend
     proxy: {
       '/api': {
         target: 'http://api-gateway:3000',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
   },
+  // Optimizations for Monaco Editor
+  optimizeDeps: {
+    include: ['@monaco-editor/react'],
+  },
 })
-

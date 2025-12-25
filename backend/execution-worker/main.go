@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/docker/docker/client"
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -18,8 +17,9 @@ import (
 
 const (
 	serviceName     = "execution-worker"
-	version         = "2.0.0"
+	version         = "4.0.0"
 	submissionQueue = "submission_queue"
+	analysisChannel = "analysis_queue" // Pub/Sub channel for analysis worker
 )
 
 // Job represents the structure shared with the API Gateway
@@ -33,14 +33,16 @@ type Job struct {
 
 // Global clients
 var (
-	redisClient *redis.Client
-	mongoClient *mongo.Client
-	mongoDb     *mongo.Database
+	redisClient    *redis.Client
+	mongoClient    *mongo.Client
+	mongoDb        *mongo.Database
+	dockerProvider *DockerProvider
 )
 
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.Printf("🚀 %s v%s starting...", serviceName, version)
+	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 	// Setup context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -52,12 +54,21 @@ func main() {
 	}
 	defer cleanup()
 
-	// Verify Docker socket connectivity (optional for code execution)
-	if err := verifyDockerConnection(); err != nil {
-		log.Printf("⚠️  Docker connection failed: %v", err)
-		log.Println("📍 Continuing anyway - Docker socket may not be mounted")
+	// Initialize Docker provider
+	var err error
+	dockerProvider, err = NewDockerProvider()
+	if err != nil {
+		log.Fatalf("❌ Failed to initialize Docker provider: %v", err)
+	}
+	defer dockerProvider.Close()
+	log.Println("✅ Docker provider initialized")
+	log.Printf("🐳 Supported languages: %v", GetSupportedLanguages())
+
+	// Ensure execution volume exists
+	if err := os.MkdirAll(ExecutionVolume, 0755); err != nil {
+		log.Printf("⚠️  Warning: Could not create execution volume at %s: %v", ExecutionVolume, err)
 	} else {
-		log.Println("✅ Docker daemon connection verified")
+		log.Printf("📁 Execution volume ready: %s", ExecutionVolume)
 	}
 
 	// Graceful shutdown handling
@@ -71,7 +82,7 @@ func main() {
 	sig := <-quit
 	log.Printf("🛑 Received signal %v, shutting down gracefully...", sig)
 	cancel() // Cancel context to stop worker loop
-	time.Sleep(1 * time.Second) // Give time for cleanup
+	time.Sleep(2 * time.Second) // Give time for cleanup
 	log.Println("👋 Worker shutdown complete")
 }
 
@@ -166,42 +177,101 @@ func processJob(ctx context.Context, jobData string) {
 	log.Printf("📝 Code preview: %s", truncate(job.Code, 100))
 
 	// 2. Update MongoDB status to "processing"
-	if err := updateJobStatus(ctx, job.JobID, "processing"); err != nil {
+	if err := updateJobStatus(ctx, job.JobID, "processing", nil); err != nil {
 		log.Printf("❌ Failed to update status to processing: %v", err)
 		return
 	}
 	log.Printf("📊 Job [%s] status updated to: processing", job.JobID)
 
-	// 3. Simulate work (2 second delay)
-	log.Printf("⏳ Simulating code execution (2 seconds)...")
-	time.Sleep(2 * time.Second)
-
-	// 4. Update MongoDB status to "completed"
-	if err := updateJobStatus(ctx, job.JobID, "completed"); err != nil {
-		log.Printf("❌ Failed to update status to completed: %v", err)
+	// 3. Execute code in Docker container
+	log.Printf("🐳 [%s] Starting Docker execution...", job.JobID)
+	result, err := dockerProvider.ExecuteCode(ctx, job.Language, job.Code, job.JobID)
+	if err != nil {
+		log.Printf("❌ [%s] Docker execution error: %v", job.JobID, err)
+		updateJobStatus(ctx, job.JobID, "failed", &ExecutionResult{
+			Output: "",
+			Error:  err.Error(),
+			Status: "failed",
+		})
 		return
 	}
 
-	log.Printf("✅ Job [%s] completed successfully!", job.JobID)
+	// 4. Log execution results
+	log.Printf("📊 [%s] Execution Result:", job.JobID)
+	log.Printf("   Status: %s", result.Status)
+	log.Printf("   Exit Code: %d", result.ExitCode)
+	log.Printf("   Duration: %v", result.ExecutionTime)
+	log.Printf("   Output: %s", truncate(result.Output, 200))
+	if result.Error != "" {
+		log.Printf("   Error: %s", result.Error)
+	}
+
+	// 5. Update MongoDB with final result
+	if err := updateJobStatus(ctx, job.JobID, result.Status, result); err != nil {
+		log.Printf("❌ Failed to update status to %s: %v", result.Status, err)
+		return
+	}
+
+	log.Printf("✅ Job [%s] finished with status: %s", job.JobID, result.Status)
+
+	// 6. Notify analysis worker via Redis Pub/Sub
+	if err := notifyAnalysisWorker(ctx, job); err != nil {
+		log.Printf("⚠️ Failed to notify analysis worker: %v", err)
+		// Non-fatal error - execution succeeded
+	} else {
+		log.Printf("📊 Job [%s] sent to analysis queue", job.JobID)
+	}
+
 	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 }
 
+// notifyAnalysisWorker publishes a message to the analysis queue
+// for the Python analysis worker to pick up and analyze
+func notifyAnalysisWorker(ctx context.Context, job Job) error {
+	// Create the message payload for the analysis worker
+	payload := map[string]interface{}{
+		"jobId":    job.JobID,
+		"language": job.Language,
+		"code":     job.Code,
+	}
+
+	// Marshal to JSON
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	// Publish to the analysis channel using Redis Pub/Sub
+	return redisClient.Publish(ctx, analysisChannel, string(data)).Err()
+}
+
 // updateJobStatus updates the status of a job in MongoDB
-func updateJobStatus(ctx context.Context, jobID string, status string) error {
+func updateJobStatus(ctx context.Context, jobID string, status string, result *ExecutionResult) error {
 	collection := mongoDb.Collection("submissions")
 
-	update := bson.M{
-		"$set": bson.M{
-			"status": status,
-		},
+	updateFields := bson.M{
+		"status": status,
 	}
 
 	// Add timestamp fields based on status
 	if status == "processing" {
-		update["$set"].(bson.M)["startedAt"] = time.Now().UTC().Format(time.RFC3339)
-	} else if status == "completed" || status == "failed" {
-		update["$set"].(bson.M)["completedAt"] = time.Now().UTC().Format(time.RFC3339)
+		updateFields["startedAt"] = time.Now().UTC().Format(time.RFC3339)
+	} else if status == "completed" || status == "failed" || status == "timeout" {
+		updateFields["completedAt"] = time.Now().UTC().Format(time.RFC3339)
+		
+		// Add execution results if provided
+		if result != nil {
+			updateFields["output"] = result.Output
+			updateFields["executionTime"] = result.ExecutionTime.Milliseconds()
+			updateFields["exitCode"] = result.ExitCode
+			
+			if result.Error != "" {
+				updateFields["error"] = result.Error
+			}
+		}
 	}
+
+	update := bson.M{"$set": updateFields}
 
 	_, err := collection.UpdateOne(
 		ctx,
@@ -210,33 +280,6 @@ func updateJobStatus(ctx context.Context, jobID string, status string) error {
 	)
 
 	return err
-}
-
-// verifyDockerConnection checks if we can communicate with the Docker daemon
-func verifyDockerConnection() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return err
-	}
-	defer cli.Close()
-
-	_, err = cli.Ping(ctx)
-	if err != nil {
-		return err
-	}
-
-	info, err := cli.Info(ctx)
-	if err != nil {
-		return err
-	}
-
-	log.Printf("🐳 Docker Server Version: %s", info.ServerVersion)
-	log.Printf("🐳 Docker Containers: %d running, %d total", info.ContainersRunning, info.Containers)
-
-	return nil
 }
 
 // getEnv retrieves an environment variable or returns a default value

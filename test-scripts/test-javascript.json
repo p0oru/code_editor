@@ -1,0 +1,5 @@
+{
+  "language": "javascript",
+  "code": "// ============================================\n// Test Script: Factorial Calculator\n// ============================================\n// This verifies that:\n// 1. JavaScript/Node execution works correctly\n// 2. Recursive functions work\n// 3. Output is captured from console.log\n// ============================================\n\nfunction factorial(n) {\n  if (n <= 1) return 1;\n  return n * factorial(n - 1);\n}\n\nconst n = 10;\nconst result = factorial(n);\nconsole.log(`Factorial of ${n} is: ${result}`);\nconsole.log(`Verification: 10! = 3628800, Match: ${result === 3628800}`);\n\n// Bonus: FizzBuzz for first 15 numbers\nconsole.log('\\nFizzBuzz (1-15):');\nfor (let i = 1; i <= 15; i++) {\n  let output = '';\n  if (i % 3 === 0) output += 'Fizz';\n  if (i % 5 === 0) output += 'Buzz';\n  console.log(output || i);\n}"
+}
+

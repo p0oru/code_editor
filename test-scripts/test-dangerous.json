@@ -1,0 +1,5 @@
+{
+  "language": "python",
+  "code": "import os\nimport subprocess\n\ndef dangerous():\n    eval(input('Enter code: '))\n    os.system('ls -la')\n    subprocess.call(['echo', 'hello'])\n\nwhile True:\n    print('loop')"
+}
+

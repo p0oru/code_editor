@@ -1,0 +1,96 @@
+# ============================================
+# Prometheus Configuration
+# ============================================
+# Scrapes metrics from:
+# - cAdvisor (container metrics: CPU, memory, network)
+# - Node.js API Gateway (if instrumented)
+# - Python Analysis Worker (FastAPI metrics)
+# - Prometheus itself (meta-monitoring)
+# ============================================
+
+global:
+  scrape_interval: 15s           # Scrape targets every 15 seconds
+  evaluation_interval: 15s       # Evaluate rules every 15 seconds
+  external_labels:
+    monitor: 'rce-engine-monitor'
+    environment: 'development'
+
+# Alertmanager configuration (optional - for future alerting)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Rule files for alerting (optional)
+# rule_files:
+#   - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # ==========================================
+  # Prometheus self-monitoring
+  # ==========================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  # ==========================================
+  # cAdvisor - Container Metrics
+  # ==========================================
+  # Provides real-time CPU, memory, network, and disk I/O metrics
+  # for all containers in the Docker environment
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    metrics_path: /metrics
+    scrape_interval: 10s  # More frequent for container metrics
+
+  # ==========================================
+  # Node.js API Gateway
+  # ==========================================
+  # Requires prom-client library in Node.js app
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:3000']
+    metrics_path: /metrics
+    scrape_interval: 15s
+    # Don't fail if metrics endpoint doesn't exist
+    honor_labels: true
+
+  # ==========================================
+  # Python Analysis Worker
+  # ==========================================
+  # FastAPI with prometheus-fastapi-instrumentator
+  - job_name: 'analysis-worker'
+    static_configs:
+      - targets: ['analysis-worker:8000']
+    metrics_path: /metrics
+    scrape_interval: 15s
+    honor_labels: true
+
+  # ==========================================
+  # Redis Exporter (optional)
+  # ==========================================
+  # Uncomment if you add redis-exporter service
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+
+  # ==========================================
+  # MongoDB Exporter (optional)
+  # ==========================================
+  # Uncomment if you add mongodb-exporter service
+  # - job_name: 'mongodb'
+  #   static_configs:
+  #     - targets: ['mongodb-exporter:9216']
+
+  # ==========================================
+  # Docker Daemon Metrics (optional)
+  # ==========================================
+  # Requires Docker daemon configured with --metrics-addr
+  # - job_name: 'docker'
+  #   static_configs:
+  #     - targets: ['host.docker.internal:9323']
+

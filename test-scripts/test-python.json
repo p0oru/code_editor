@@ -1,0 +1,5 @@
+{
+  "language": "python",
+  "code": "# ============================================\n# Test Script: Sum of First 100 Numbers\n# ============================================\n# This verifies that:\n# 1. Python execution works correctly\n# 2. Output is captured from stdout\n# 3. Results are saved to MongoDB\n# ============================================\n\nresult = sum(range(1, 101))\nprint(f\"The sum of numbers 1 to 100 is: {result}\")\n\n# Verify with the mathematical formula: n(n+1)/2\nformula_result = 100 * 101 // 2\nprint(f\"Verification using formula: {formula_result}\")\nprint(f\"Match: {result == formula_result}\")"
+}
+

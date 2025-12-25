@@ -116,7 +116,8 @@ app.post('/submit', async (req: Request, res: Response, next: NextFunction) => {
 });
 
 /**
- * GET /status/:jobId - Check job status
+ * GET /status/:jobId - Check job status and execution results
+ * Used by frontend for polling job completion
  */
 app.get('/status/:jobId', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -133,6 +134,7 @@ app.get('/status/:jobId', async (req: Request, res: Response, next: NextFunction
       return;
     }
 
+    // Return all relevant fields for the frontend
     res.json({
       success: true,
       jobId: submission.jobId,
@@ -141,8 +143,14 @@ app.get('/status/:jobId', async (req: Request, res: Response, next: NextFunction
       submittedAt: submission.submittedAt,
       startedAt: submission.startedAt,
       completedAt: submission.completedAt,
-      result: submission.result,
-      error: submission.error,
+      // Execution results
+      output: submission.output || '',
+      executionTime: submission.executionTime || 0,
+      exitCode: submission.exitCode,
+      error: submission.error || '',
+      // Analysis results (from Python analysis worker)
+      analysisReport: submission.analysisReport,
+      analyzedAt: submission.analyzedAt,
     });
   } catch (error) {
     next(error);

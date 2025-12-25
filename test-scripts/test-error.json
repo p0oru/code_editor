@@ -1,0 +1,5 @@
+{
+  "language": "python",
+  "code": "# ============================================\n# Test Script: Runtime Error\n# ============================================\n# This verifies that:\n# 1. Errors are captured in stderr\n# 2. Exit code is non-zero\n# 3. Status is set to 'failed' in MongoDB\n# ============================================\n\nprint(\"About to cause an error...\")\n\n# This will cause a ZeroDivisionError\nresult = 10 / 0\n\nprint(\"This line will never execute\")"
+}
+

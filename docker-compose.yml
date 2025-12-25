@@ -1,33 +1,76 @@
 # ============================================
 # RCE Engine - Docker Compose Configuration
 # ============================================
-# Stage 2: Producer-Consumer Pattern
-#   - API Gateway (Producer) → Pushes to Redis Queue
-#   - Execution Worker (Consumer) → Pulls from Redis Queue
-#   - MongoDB stores job status
+# FINAL STAGE: Production-Grade Infrastructure
+# 
+# Architecture:
+#   - Nginx API Gateway (single entry point on port 80)
+#   - API Gateway (Node.js) → Pushes to Redis Queue
+#   - Execution Worker (Go) → Spawns ephemeral containers
+#   - Analysis Worker (Python) → Static code analysis via Pub/Sub
+#   - MongoDB stores job status, results & analysis reports
+# 
+# Observability Stack:
+#   - Prometheus: Metrics collection & alerting
+#   - Grafana: Visualization dashboards
+#   - cAdvisor: Container resource metrics
+# 
+# Security Features:
+#   - Non-root users in all custom containers
+#   - Ephemeral execution containers with strict limits
+#   - Network isolation for execution containers
+#   - Memory: 128MB max, CPU: 0.5 cores per execution
+#   - 5 second execution timeout
 # ============================================
 
 services:
   # ==========================================
-  # Frontend - React/Vite Development Server
+  # Nginx - API Gateway & Reverse Proxy
+  # Single entry point for the entire application
+  # ==========================================
+  nginx:
+    image: nginx:alpine
+    container_name: rce-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - rce-net
+    depends_on:
+      frontend:
+        condition: service_started
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t && kill -0 `cat /var/run/nginx.pid`"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ==========================================
+  # Frontend - React/Vite Application
   # ==========================================
   frontend:
     build:
       context: ./frontend/code-editor
       dockerfile: Dockerfile
     container_name: rce-frontend
-    ports:
-      - "5173:5173"
+    expose:
+      - "5173"
     volumes:
       - ./frontend/code-editor:/app
       - /app/node_modules
     environment:
       - NODE_ENV=development
-      - VITE_API_URL=http://localhost:3000
+      - VITE_API_URL=/api
     networks:
       - rce-net
     depends_on:
-      - api-gateway
+      api-gateway:
+        condition: service_healthy
     restart: unless-stopped
 
   # ==========================================
@@ -39,14 +82,12 @@ services:
       context: ./backend/api-gateway
       dockerfile: Dockerfile
     container_name: rce-api-gateway
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
-      # Redis connection - must use 'redis' as hostname (service name)
       - REDIS_URL=redis://redis:6379
-      # MongoDB connection - must use 'mongo' as hostname (service name)
       - MONGO_URL=mongodb://mongo:27017/rce-engine
     networks:
       - rce-net
@@ -62,10 +103,19 @@ services:
       retries: 3
       start_period: 15s
     restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
   # ==========================================
   # Execution Worker - Go
-  # THE CONSUMER - Listens to Redis, processes jobs
+  # THE CONSUMER - Spawns Docker containers for code execution
   # ==========================================
   execution-worker:
     build:
@@ -73,11 +123,12 @@ services:
       dockerfile: Dockerfile
     container_name: rce-execution-worker
     volumes:
+      # Docker socket for spawning sibling containers
       - /var/run/docker.sock:/var/run/docker.sock
+      # Shared execution volume
+      - executions-volume:/tmp/executions
     environment:
-      # Redis connection - must use 'redis' as hostname (service name)
       - REDIS_URL=redis://redis:6379
-      # MongoDB connection - must use 'mongo' as hostname (service name)
       - MONGO_URL=mongodb://mongo:27017/rce-engine
       - DOCKER_HOST=unix:///var/run/docker.sock
     networks:
@@ -88,18 +139,72 @@ services:
       mongo:
         condition: service_healthy
     restart: unless-stopped
+    # Resource limits for worker (not execution containers)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 64M
 
   # ==========================================
-  # Redis - Job Queue (The Message Broker)
+  # Analysis Worker - Python
+  # STATIC CODE ANALYZER - Listens to Pub/Sub
+  # ==========================================
+  analysis-worker:
+    build:
+      context: ./backend/analysis-worker
+      dockerfile: Dockerfile
+    container_name: rce-analysis-worker
+    expose:
+      - "8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - MONGO_URL=mongodb://mongo:27017/rce-engine
+      - MONGO_DB=rce-engine
+      - ANALYSIS_QUEUE=analysis_queue
+    networks:
+      - rce-net
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # ==========================================
+  # Redis - Job Queue (Message Broker)
   # ==========================================
   redis:
     image: redis:7-alpine
     container_name: rce-redis
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxmemory 256mb 
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 300
     networks:
       - rce-net
     healthcheck:
@@ -109,15 +214,23 @@ services:
       retries: 5
       start_period: 5s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 300M
+        reservations:
+          cpus: '0.1'
+          memory: 50M
 
   # ==========================================
-  # MongoDB - Persistent Storage (Job Status)
+  # MongoDB - Persistent Storage
   # ==========================================
   mongo:
     image: mongo:7
     container_name: rce-mongo
-    ports:
-      - "27017:27017"
+    expose:
+      - "27017"
     volumes:
       - mongo-data:/data/db
       - mongo-config:/data/configdb
@@ -132,6 +245,116 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # ==========================================
+  # OBSERVABILITY STACK
+  # ==========================================
+
+  # cAdvisor - Container Metrics Exporter
+  # Google's tool for monitoring container resource usage
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: rce-cadvisor
+    privileged: true
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - rce-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Prometheus - Metrics Collection & Alerting
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: rce-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - rce-net
+    depends_on:
+      - cadvisor
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+
+  # Grafana - Visualization & Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: rce-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=rceadmin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    networks:
+      - rce-net
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
 
 # ==========================================
 # Networks
@@ -140,6 +363,9 @@ networks:
   rce-net:
     driver: bridge
     name: rce-net
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 # ==========================================
 # Volumes - Persistent Data
@@ -151,3 +377,9 @@ volumes:
     name: rce-mongo-data
   mongo-config:
     name: rce-mongo-config
+  executions-volume:
+    name: rce-executions
+  prometheus-data:
+    name: rce-prometheus-data
+  grafana-data:
+    name: rce-grafana-data

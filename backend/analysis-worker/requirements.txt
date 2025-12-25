@@ -1,0 +1,28 @@
+# ============================================
+# Python Analysis Worker - Dependencies
+# ============================================
+
+# Web Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+
+# Redis
+redis==5.0.1
+
+# MongoDB
+pymongo==4.6.1
+motor==3.3.2
+
+# Async support
+asyncio-redis==0.16.0
+
+# Code Analysis (JavaScript)
+esprima==4.0.1
+
+# Environment
+python-dotenv==1.0.1
+
+# Type hints & validation
+pydantic==2.6.1
+pydantic-settings==2.1.0
+
